@@ -37,17 +37,8 @@ ConnectionFX3Entry::ConnectionFX3Entry(const char* connectionName):
     ConnectionRegistryEntry(connectionName)
 {
 #ifdef __unix__
-    int r = libusb_init(&ctx); //initialize the library for the session we just declared
-    if(r < 0)
-        lime::error("Init Error %i", r); //there was an error
-#if LIBUSBX_API_VERSION < 0x01000106
-    libusb_set_debug(ctx, 3); //set verbosity level to 3, as suggested in the documentation
-#else
-    libusb_set_option(ctx, LIBUSB_OPTION_LOG_LEVEL, 3); //set verbosity level to 3, as suggested in the documentation
-#endif
-    mProcessUSBEvents.store(true);
-    mUSBProcessingThread = std::thread(&ConnectionFX3Entry::handle_libusb_events, this);
-    SetOSThreadPriority(ThreadPriority::NORMAL, ThreadPolicy::REALTIME, &mUSBProcessingThread);
+    ctx = nullptr;
+    mProcessUSBEvents.store(false);
 #endif
 }
 
@@ -55,26 +46,22 @@ ConnectionFX3Entry::ConnectionFX3Entry(void):
     ConnectionRegistryEntry("FX3")
 {
 #ifdef __unix__
-    int r = libusb_init(&ctx); //initialize the library for the session we just declared
-    if(r < 0)
-        lime::error("Init Error %i", r); //there was an error
-#if LIBUSBX_API_VERSION < 0x01000106
-    libusb_set_debug(ctx, 3); //set verbosity level to 3, as suggested in the documentation
-#else
-    libusb_set_option(ctx, LIBUSB_OPTION_LOG_LEVEL, 3); //set verbosity level to 3, as suggested in the documentation
-#endif
-    mProcessUSBEvents.store(true);
-    mUSBProcessingThread = std::thread(&ConnectionFX3Entry::handle_libusb_events, this);
-    SetOSThreadPriority(ThreadPriority::NORMAL, ThreadPolicy::REALTIME, &mUSBProcessingThread);
+    ctx = nullptr;
+    mProcessUSBEvents.store(false);
 #endif
 }
 
 ConnectionFX3Entry::~ConnectionFX3Entry(void)
 {
 #ifdef __unix__
-    mProcessUSBEvents.store(false);
-    mUSBProcessingThread.join();
-    libusb_exit(ctx);
+    if (ctx != nullptr) {
+        mProcessUSBEvents.store(false);
+        if (mUSBProcessingThread.joinable()) {
+            mUSBProcessingThread.join();
+        }
+        libusb_exit(ctx);
+        ctx = nullptr;
+    }
 #endif
 }
 
@@ -102,18 +89,35 @@ std::vector<ConnectionHandle> ConnectionFX3Entry::enumerate(const ConnectionHand
             lime::error("Invalid file descriptor in hint.addr: %s", e.what());
         }
     }
+
+    // Initialize libusb only if we're not in direct FD mode
+    if (ctx == nullptr) {
+        int r = libusb_init(&ctx); //initialize the library for the session we just declared
+        if(r < 0) {
+            lime::error("Init Error %i", r); //there was an error
+            return handles;
+        }
+#if LIBUSBX_API_VERSION < 0x01000106
+        libusb_set_debug(ctx, 3); //set verbosity level to 3, as suggested in the documentation
+#else
+        libusb_set_option(ctx, LIBUSB_OPTION_LOG_LEVEL, 3); //set verbosity level to 3, as suggested in the documentation
+#endif
+        mProcessUSBEvents.store(true);
+        mUSBProcessingThread = std::thread(&ConnectionFX3Entry::handle_libusb_events, this);
+        SetOSThreadPriority(ThreadPriority::NORMAL, ThreadPolicy::REALTIME, &mUSBProcessingThread);
+    }
 #endif
 
 #ifndef __unix__
-	CCyUSBDevice device;
-	if (device.DeviceCount())
+    CCyUSBDevice device;
+    if (device.DeviceCount())
     {
-		for (int i = 0; i<device.DeviceCount(); ++i)
+        for (int i = 0; i<device.DeviceCount(); ++i)
         {
-			if (hint.index >= 0 && hint.index != i)
-				continue;
-			if (device.IsOpen())
-				device.Close();
+            if (hint.index >= 0 && hint.index != i)
+                continue;
+            if (device.IsOpen())
+                device.Close();
             device.Open(i);
             ConnectionHandle handle;
             if (device.bSuperSpeed == true)
