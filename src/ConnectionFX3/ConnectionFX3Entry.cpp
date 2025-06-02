@@ -77,11 +77,22 @@ std::vector<ConnectionHandle> ConnectionFX3Entry::enumerate(const ConnectionHand
         std::cout << "[ConnectionFX3Entry] hint.addr is empty" << std::endl;
     }
 
-    // Check if hint.addr specifies a direct file descriptor
+    // Check for direct file descriptor in hint.addr or TERMUX_USB_FD
+    std::string fd_str;
     if (!hint.addr.empty() && hint.addr.substr(0, 3) == "fd:") {
-        std::cout << "[ConnectionFX3Entry] Detected direct FD mode in hint.addr: " << hint.addr << std::endl;
+        fd_str = hint.addr.substr(3);
+        std::cout << "[ConnectionFX3Entry] Using FD from hint.addr: " << fd_str << std::endl;
+    } else {
+        const char* termux_fd = getenv("TERMUX_USB_FD");
+        if (termux_fd != nullptr) {
+            fd_str = termux_fd;
+            std::cout << "[ConnectionFX3Entry] Using FD from TERMUX_USB_FD: " << fd_str << std::endl;
+        }
+    }
+
+    if (!fd_str.empty()) {
         try {
-            int fd = std::stoi(hint.addr.substr(3));
+            int fd = std::stoi(fd_str);
             std::cout << "[ConnectionFX3Entry] Parsed FD number: " << fd << std::endl;
             // Verify the file descriptor is valid and points to a character device
             struct stat st;
@@ -90,7 +101,7 @@ std::vector<ConnectionHandle> ConnectionFX3Entry::enumerate(const ConnectionHand
                 ConnectionHandle handle;
                 handle.media = "Direct FD";
                 handle.name = "Direct File Descriptor";
-                handle.addr = hint.addr;
+                handle.addr = "fd:" + fd_str;  // Always use fd: prefix for consistency
                 handle.serial = "direct_fd";
                 handles.push_back(handle);
                 std::cout << "[ConnectionFX3Entry] Added direct FD handle to enumeration results" << std::endl;
@@ -100,7 +111,7 @@ std::vector<ConnectionHandle> ConnectionFX3Entry::enumerate(const ConnectionHand
             }
         } catch (const std::exception& e) {
             std::cout << "[ConnectionFX3Entry] Error processing FD: " << e.what() << std::endl;
-            lime::error("Invalid file descriptor in hint.addr: %s", e.what());
+            lime::error("Invalid file descriptor: %s", e.what());
         }
     }
 
