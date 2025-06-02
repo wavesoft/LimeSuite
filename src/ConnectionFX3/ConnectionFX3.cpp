@@ -14,6 +14,10 @@
 #include <fstream>
 #include <thread>
 #include <chrono>
+#include <unistd.h>
+#ifdef __unix__
+#include <sys/stat.h>
+#endif
 
 using namespace std;
 
@@ -194,6 +198,37 @@ int ConnectionFX3::Open(const std::string &vidpid, const std::string &serial, co
             break;
         }
 #else
+    // Check if we're using direct file descriptor access
+    if (vidpid.substr(0, 3) == "fd:") {
+        try {
+            direct_fd = std::stoi(vidpid.substr(3));
+            is_direct_fd = true;
+            
+            // Verify the file descriptor is valid and points to a USB device
+            struct stat st;
+            if (fstat(direct_fd, &st) != 0) {
+                return ReportError(-1, "Invalid file descriptor");
+            }
+            
+            // Check if it's a character device (typical for USB devices)
+            if (!S_ISCHR(st.st_mode)) {
+                return ReportError(-1, "File descriptor does not point to a character device");
+            }
+            
+            // Set up bulk control endpoints
+            bulkCtrlAvailable = true;
+            isConnected = true;
+            contexts = new USBTransferContext[USB_MAX_CONTEXTS];
+            contextsToSend = new USBTransferContext[USB_MAX_CONTEXTS];
+            return 0;
+        } catch (const std::exception& e) {
+            return ReportError(-1, "Invalid file descriptor format");
+        }
+    }
+
+    // Regular libusb initialization
+    is_direct_fd = false;
+    direct_fd = -1;
     const auto splitPos = vidpid.find(":");
     const auto vid = std::stoi(vidpid.substr(0, splitPos), nullptr, 16);
     const auto pid = std::stoi(vidpid.substr(splitPos+1), nullptr, 16);
@@ -326,12 +361,14 @@ void ConnectionFX3::Close()
         OutCtrlEndPt3 = nullptr;
     }
     #else
-    if(dev_handle != 0)
+    if (!is_direct_fd && dev_handle != 0)
     {
         libusb_release_interface(dev_handle, 0);
         libusb_close(dev_handle);
         dev_handle = 0;
     }
+    direct_fd = -1;
+    is_direct_fd = false;
     #endif
     isConnected = false;
 }
@@ -376,7 +413,15 @@ int ConnectionFX3::Write(const unsigned char *buffer, const int length, int time
     else
         len = 0;
     #else
-    if(bulkCtrlAvailable
+    if (is_direct_fd) {
+        ssize_t written = write(direct_fd, wbuffer, length);
+        if (written < 0) {
+            len = 0;
+        } else {
+            len = written;
+        }
+    }
+    else if(bulkCtrlAvailable
         && commandsToBulkCtrl.find(buffer[0]) != commandsToBulkCtrl.end())
     {
         bulkCtrlInProgress = true;
@@ -416,7 +461,15 @@ int ConnectionFX3::Read(unsigned char *buffer, const int length, int timeout_ms)
     else
         len = 0;
 #else
-    if(bulkCtrlAvailable && bulkCtrlInProgress)
+    if (is_direct_fd) {
+        ssize_t read_bytes = read(direct_fd, buffer, length);
+        if (read_bytes < 0) {
+            len = 0;
+        } else {
+            len = read_bytes;
+        }
+    }
+    else if(bulkCtrlAvailable && bulkCtrlInProgress)
     {
         int actual = 0;
         int r = libusb_bulk_transfer(dev_handle, ctrlBulkInAddr, buffer, len, &actual, timeout_ms);

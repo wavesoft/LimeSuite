@@ -143,6 +143,10 @@ protected:
     int read_firmware_image(unsigned char *buf, int len);
     int fx3_usbboot_download(unsigned char *buf, int len);
     int ram_write(unsigned char *buf, unsigned int ramAddress, int len);
+    
+    // Direct file descriptor support
+    int direct_fd; // File descriptor for direct device access
+    bool is_direct_fd; // Flag indicating if we're using direct FD access
 #endif
     static const uint8_t ctrlBulkOutAddr;
     static const uint8_t ctrlBulkInAddr;

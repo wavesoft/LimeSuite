@@ -7,6 +7,9 @@
 #include "ConnectionFX3.h"
 #include "Logger.h"
 #include "threadHelper.h"
+#ifdef __unix__
+#include <sys/stat.h>
+#endif
 
 using namespace lime;
 
@@ -78,6 +81,28 @@ ConnectionFX3Entry::~ConnectionFX3Entry(void)
 std::vector<ConnectionHandle> ConnectionFX3Entry::enumerate(const ConnectionHandle &hint)
 {
     std::vector<ConnectionHandle> handles;
+
+#ifdef __unix__
+    // Check if hint.addr specifies a direct file descriptor
+    if (!hint.addr.empty() && hint.addr.substr(0, 3) == "fd:") {
+        try {
+            int fd = std::stoi(hint.addr.substr(3));
+            // Verify the file descriptor is valid and points to a character device
+            struct stat st;
+            if (fstat(fd, &st) == 0 && S_ISCHR(st.st_mode)) {
+                ConnectionHandle handle;
+                handle.media = "Direct FD";
+                handle.name = "Direct File Descriptor";
+                handle.addr = hint.addr;
+                handle.serial = "direct_fd";
+                handles.push_back(handle);
+                return handles; // Return only the direct FD entry if it exists
+            }
+        } catch (const std::exception& e) {
+            lime::error("Invalid file descriptor in hint.addr: %s", e.what());
+        }
+    }
+#endif
 
 #ifndef __unix__
 	CCyUSBDevice device;
