@@ -90,6 +90,7 @@ std::vector<ConnectionHandle> ConnectionFX3Entry::enumerate(const ConnectionHand
         }
     }
 
+    bool is_direct_fd_mode = false;
     if (!fd_str.empty()) {
         try {
             int fd = std::stoi(fd_str);
@@ -105,7 +106,7 @@ std::vector<ConnectionHandle> ConnectionFX3Entry::enumerate(const ConnectionHand
                 handle.serial = "direct_fd";
                 handles.push_back(handle);
                 std::cout << "[ConnectionFX3Entry] Added direct FD handle to enumeration results" << std::endl;
-                return handles; // Return only the direct FD entry if it exists
+                is_direct_fd_mode = true;
             } else {
                 std::cout << "[ConnectionFX3Entry] FD is not a valid character device" << std::endl;
             }
@@ -115,21 +116,30 @@ std::vector<ConnectionHandle> ConnectionFX3Entry::enumerate(const ConnectionHand
         }
     }
 
-    // Initialize libusb only if we're not in direct FD mode
+    // Initialize libusb with appropriate options based on mode
     if (ctx == nullptr) {
-        int r = libusb_init(&ctx); //initialize the library for the session we just declared
+        if (is_direct_fd_mode) {
+            // In direct FD mode, disable device discovery
+            libusb_set_option(nullptr, LIBUSB_OPTION_NO_DEVICE_DISCOVERY);
+        }
+        int r = libusb_init(&ctx);
         if(r < 0) {
-            lime::error("Init Error %i", r); //there was an error
+            lime::error("Init Error %i", r);
             return handles;
         }
 #if LIBUSBX_API_VERSION < 0x01000106
-        libusb_set_debug(ctx, 3); //set verbosity level to 3, as suggested in the documentation
+        libusb_set_debug(ctx, 3);
 #else
-        libusb_set_option(ctx, LIBUSB_OPTION_LOG_LEVEL, 3); //set verbosity level to 3, as suggested in the documentation
+        libusb_set_option(ctx, LIBUSB_OPTION_LOG_LEVEL, 3);
 #endif
         mProcessUSBEvents.store(true);
         mUSBProcessingThread = std::thread(&ConnectionFX3Entry::handle_libusb_events, this);
         SetOSThreadPriority(ThreadPriority::NORMAL, ThreadPolicy::REALTIME, &mUSBProcessingThread);
+    }
+
+    // If we're in direct FD mode, we already have our handle, so return
+    if (is_direct_fd_mode) {
+        return handles;
     }
 #endif
 

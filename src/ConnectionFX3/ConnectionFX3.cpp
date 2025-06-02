@@ -223,6 +223,36 @@ int ConnectionFX3::Open(const std::string &vidpid, const std::string &serial, co
             }
             
             std::cout << "[ConnectionFX3] FD is valid character device" << std::endl;
+
+            // Initialize libusb with device discovery disabled
+            libusb_set_option(nullptr, LIBUSB_OPTION_NO_DEVICE_DISCOVERY);
+            int r = libusb_init(&ctx);
+            if (r < 0) {
+                std::cout << "[ConnectionFX3] Failed to initialize libusb" << std::endl;
+                return ReportError(-1, "Failed to initialize libusb");
+            }
+
+            // Wrap the file descriptor with libusb
+            r = libusb_wrap_sys_device(ctx, (intptr_t)direct_fd, &dev_handle);
+            if (r < 0) {
+                std::cout << "[ConnectionFX3] Failed to wrap file descriptor with libusb" << std::endl;
+                libusb_exit(ctx);
+                return ReportError(-1, "Failed to wrap file descriptor with libusb");
+            }
+
+            // Get device descriptor to verify it's a valid USB device
+            libusb_device* device = libusb_get_device(dev_handle);
+            struct libusb_device_descriptor desc;
+            r = libusb_get_device_descriptor(device, &desc);
+            if (r < 0) {
+                std::cout << "[ConnectionFX3] Failed to get device descriptor" << std::endl;
+                libusb_close(dev_handle);
+                libusb_exit(ctx);
+                return ReportError(-1, "Failed to get device descriptor");
+            }
+
+            std::cout << "[ConnectionFX3] Successfully wrapped FD with libusb" << std::endl;
+            std::cout << "[ConnectionFX3] Device: " << std::hex << desc.idVendor << ":" << desc.idProduct << std::dec << std::endl;
             
             // Set up bulk control endpoints
             bulkCtrlAvailable = true;
