@@ -170,6 +170,8 @@ protected:
     std::thread mUSBProcessingThread;
     void handle_libusb_events();
     std::atomic<bool> mProcessUSBEvents;
+    bool initialize_libusb();
+    void cleanup_libusb();
 #endif
 };
 

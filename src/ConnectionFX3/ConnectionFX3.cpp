@@ -194,48 +194,62 @@ int ConnectionFX3::Open(const std::string &vidpid, const std::string &serial, co
             break;
         }
 #else
-    const auto splitPos = vidpid.find(":");
-    const auto vid = std::stoi(vidpid.substr(0, splitPos), nullptr, 16);
-    const auto pid = std::stoi(vidpid.substr(splitPos+1), nullptr, 16);
-
-    libusb_device **devs; //pointer to pointer of device, used to retrieve a list of devices
-    int usbDeviceCount = libusb_get_device_list(ctx, &devs);
-
-    if (usbDeviceCount < 0) {
-        return ReportError(-1, "libusb_get_device_list failed: %s", libusb_strerror(libusb_error(usbDeviceCount)));
-    }
-
-    for(int i=0; i<usbDeviceCount; ++i)
-    {
-        libusb_device_descriptor desc;
-        int r = libusb_get_device_descriptor(devs[i], &desc);
-        if(r<0) {
-            lime::error("failed to get device description");
-            continue;
+    // Check if vidpid is in the format "fd:<number>"
+    if (vidpid.substr(0, 3) == "fd:") {
+        int fd;
+        if (sscanf(vidpid.substr(3).c_str(), "%d", &fd) != 1) {
+            return ReportError(-1, "Invalid file descriptor format");
         }
-        if (desc.idProduct != pid) continue;
-        if (desc.idVendor != vid) continue;
-        if(libusb_open(devs[i], &dev_handle) != 0) continue;
+        
+        int r = libusb_wrap_sys_device(ctx, (intptr_t)fd, &dev_handle);
+        if (r != 0) {
+            return ReportError(-1, "Failed to wrap file descriptor: %s", libusb_strerror(libusb_error(r)));
+        }
+    } else {
+        const auto splitPos = vidpid.find(":");
+        const auto vid = std::stoi(vidpid.substr(0, splitPos), nullptr, 16);
+        const auto pid = std::stoi(vidpid.substr(splitPos+1), nullptr, 16);
 
-        std::string foundSerial;
-        if (desc.iSerialNumber > 0)
+        libusb_device **devs; //pointer to pointer of device, used to retrieve a list of devices
+        int usbDeviceCount = libusb_get_device_list(ctx, &devs);
+
+        if (usbDeviceCount < 0) {
+            return ReportError(-1, "libusb_get_device_list failed: %s", libusb_strerror(libusb_error(usbDeviceCount)));
+        }
+
+        for(int i=0; i<usbDeviceCount; ++i)
         {
-            char data[255];
-            r = libusb_get_string_descriptor_ascii(dev_handle,desc.iSerialNumber,(unsigned char*)data, sizeof(data));
-            if(r<0)
-                lime::error("failed to get serial number");
-            else
-                foundSerial = std::string(data, size_t(r));
+            libusb_device_descriptor desc;
+            int r = libusb_get_device_descriptor(devs[i], &desc);
+            if(r<0) {
+                lime::error("failed to get device description");
+                continue;
+            }
+            if (desc.idProduct != pid) continue;
+            if (desc.idVendor != vid) continue;
+            if(libusb_open(devs[i], &dev_handle) != 0) continue;
+
+            std::string foundSerial;
+            if (desc.iSerialNumber > 0)
+            {
+                char data[255];
+                r = libusb_get_string_descriptor_ascii(dev_handle,desc.iSerialNumber,(unsigned char*)data, sizeof(data));
+                if(r<0)
+                    lime::error("failed to get serial number");
+                else
+                    foundSerial = std::string(data, size_t(r));
+            }
+
+            if (serial == foundSerial) break; //found it
+            libusb_close(dev_handle);
+            dev_handle = nullptr;
         }
+        libusb_free_device_list(devs, 1);
 
-        if (serial == foundSerial) break; //found it
-        libusb_close(dev_handle);
-        dev_handle = nullptr;
+        if(dev_handle == nullptr)
+            return ReportError(-1, "libusb_open failed");
     }
-    libusb_free_device_list(devs, 1);
 
-    if(dev_handle == nullptr)
-        return ReportError(-1, "libusb_open failed");
     if(libusb_kernel_driver_active(dev_handle, 0) == 1)   //find out if kernel driver is attached
     {
         lime::info("Kernel Driver Active");
