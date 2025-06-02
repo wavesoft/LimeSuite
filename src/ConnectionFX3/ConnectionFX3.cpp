@@ -76,6 +76,8 @@ ConnectionFX3::ConnectionFX3(void *arg, const std::string &vidpid, const std::st
 #else
     dev_handle = nullptr;
     ctx = (libusb_context *)arg;
+    direct_fd = -1;
+    is_direct_fd = false;
 #endif
     if (this->Open(vidpid, serial, index) != 0)
         lime::error("Failed to open device");
@@ -562,6 +564,12 @@ int ConnectionFX3::BeginDataReading(char *buffer, uint32_t length, int ep)
     }
 	return i;
     #else
+    if (is_direct_fd) {
+        // For direct FD mode, we don't need to set up libusb transfer
+        contexts[i].done = false;
+        contexts[i].bytesXfered = 0;
+        return i;
+    }
     libusb_transfer *tr = contexts[i].transfer;
     libusb_fill_bulk_transfer(tr, dev_handle, streamBulkInAddr, (unsigned char*)buffer, length, callback_libusbtransfer, &contexts[i], 0);
     contexts[i].done = false;
@@ -592,6 +600,10 @@ bool ConnectionFX3::WaitForReading(int contextHandle, unsigned int timeout_ms)
     status = contexts[contextHandle].EndPt->WaitForXfer(contexts[contextHandle].inOvLap, timeout_ms);
 	return status;
     #else
+    if (is_direct_fd) {
+        // For direct FD mode, we don't need to wait for libusb events
+        return true;
+    }
     //blocking not to waste CPU
     std::unique_lock<std::mutex> lck(contexts[contextHandle].transferLock);
     return contexts[contextHandle].cv.wait_for(lck, chrono::milliseconds(timeout_ms), [&](){return contexts[contextHandle].done.load();});
@@ -619,6 +631,12 @@ int ConnectionFX3::FinishDataReading(char *buffer, uint32_t length, int contextH
     contexts[contextHandle].reset();
     return len;
     #else
+    if (is_direct_fd) {
+        // For direct FD mode, we don't need to finish libusb transfer
+        contexts[contextHandle].used = false;
+        contexts[contextHandle].reset();
+        return length;
+    }
 	length = contexts[contextHandle].bytesXfered;
 	contexts[contextHandle].used = false;
 	contexts[contextHandle].reset();
@@ -639,10 +657,12 @@ void ConnectionFX3::AbortReading(int ep)
         if (InEndPt[i] && InEndPt[i]->Address == 0x81)
 	        InEndPt[i]->Abort();
 #else
-    for(int i=0; i<USB_MAX_CONTEXTS; ++i)
-    {
-        if(contexts[i].used && contexts[i].transfer->endpoint == 0x81)
-            libusb_cancel_transfer( contexts[i].transfer );
+    if (!is_direct_fd) {
+        for(int i=0; i<USB_MAX_CONTEXTS; ++i)
+        {
+            if(contexts[i].used && contexts[i].transfer->endpoint == 0x81)
+                libusb_cancel_transfer(contexts[i].transfer);
+        }
     }
 #endif
     for(int i=0; i<USB_MAX_CONTEXTS; ++i)
@@ -687,6 +707,12 @@ int ConnectionFX3::BeginDataSending(const char *buffer, uint32_t length, int ep)
     }
 	return i;
     #else
+    if (is_direct_fd) {
+        // For direct FD mode, we don't need to set up libusb transfer
+        contextsToSend[i].done = false;
+        contextsToSend[i].bytesXfered = 0;
+        return i;
+    }
     libusb_transfer *tr = contextsToSend[i].transfer;
     contextsToSend[i].done = false;
     contextsToSend[i].bytesXfered = 0;
@@ -717,6 +743,10 @@ bool ConnectionFX3::WaitForSending(int contextHandle, unsigned int timeout_ms)
 	status = contextsToSend[contextHandle].EndPt->WaitForXfer(contextsToSend[contextHandle].inOvLap, timeout_ms);
 	return status;
 #   else
+    if (is_direct_fd) {
+        // For direct FD mode, we don't need to wait for libusb events
+        return true;
+    }
     //blocking not to waste CPU
     std::unique_lock<std::mutex> lck(contextsToSend[contextHandle].transferLock);
     return contextsToSend[contextHandle].cv.wait_for(lck, chrono::milliseconds(timeout_ms), [&](){return contextsToSend[contextHandle].done.load();});
@@ -743,6 +773,12 @@ int ConnectionFX3::FinishDataSending(const char *buffer, uint32_t length, int co
         contextsToSend[contextHandle].reset();
         return len;
 #else
+    if (is_direct_fd) {
+        // For direct FD mode, we don't need to finish libusb transfer
+        contextsToSend[contextHandle].used = false;
+        contextsToSend[contextHandle].reset();
+        return length;
+    }
 	length = contextsToSend[contextHandle].bytesXfered;
 	contextsToSend[contextHandle].used = false;
         contextsToSend[contextHandle].reset();
@@ -763,10 +799,12 @@ void ConnectionFX3::AbortSending(int ep)
         if (OutEndPt[i] && OutEndPt[i]->Address == 0x01)
             OutEndPt[i]->Abort();
 #else
-    for (int i = 0; i<USB_MAX_CONTEXTS; ++i)
-    {
-        if(contextsToSend[i].used && contextsToSend[i].transfer->endpoint == 0x01)
-            libusb_cancel_transfer(contextsToSend[i].transfer);
+    if (!is_direct_fd) {
+        for (int i = 0; i<USB_MAX_CONTEXTS; ++i)
+        {
+            if(contextsToSend[i].used && contextsToSend[i].transfer->endpoint == 0x01)
+                libusb_cancel_transfer(contextsToSend[i].transfer);
+        }
     }
 #endif
     for (int i = 0; i<USB_MAX_CONTEXTS; ++i)
