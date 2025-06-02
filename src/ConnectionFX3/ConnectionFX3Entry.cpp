@@ -7,6 +7,7 @@
 #include "ConnectionFX3.h"
 #include "Logger.h"
 #include "threadHelper.h"
+#include <iostream>
 #ifdef __unix__
 #include <sys/stat.h>
 #endif
@@ -72,20 +73,27 @@ std::vector<ConnectionHandle> ConnectionFX3Entry::enumerate(const ConnectionHand
 #ifdef __unix__
     // Check if hint.addr specifies a direct file descriptor
     if (!hint.addr.empty() && hint.addr.substr(0, 3) == "fd:") {
+        std::cout << "[ConnectionFX3Entry] Detected direct FD mode in hint.addr: " << hint.addr << std::endl;
         try {
             int fd = std::stoi(hint.addr.substr(3));
+            std::cout << "[ConnectionFX3Entry] Parsed FD number: " << fd << std::endl;
             // Verify the file descriptor is valid and points to a character device
             struct stat st;
             if (fstat(fd, &st) == 0 && S_ISCHR(st.st_mode)) {
+                std::cout << "[ConnectionFX3Entry] FD is valid character device" << std::endl;
                 ConnectionHandle handle;
                 handle.media = "Direct FD";
                 handle.name = "Direct File Descriptor";
                 handle.addr = hint.addr;
                 handle.serial = "direct_fd";
                 handles.push_back(handle);
+                std::cout << "[ConnectionFX3Entry] Added direct FD handle to enumeration results" << std::endl;
                 return handles; // Return only the direct FD entry if it exists
+            } else {
+                std::cout << "[ConnectionFX3Entry] FD is not a valid character device" << std::endl;
             }
         } catch (const std::exception& e) {
+            std::cout << "[ConnectionFX3Entry] Error processing FD: " << e.what() << std::endl;
             lime::error("Invalid file descriptor in hint.addr: %s", e.what());
         }
     }
