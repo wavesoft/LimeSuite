@@ -71,6 +71,12 @@ std::vector<ConnectionHandle> ConnectionFX3Entry::enumerate(const ConnectionHand
     std::vector<ConnectionHandle> handles;
 
 #ifdef __unix__
+    if (!hint.addr.empty()) {
+        std::cout << "[ConnectionFX3Entry] hint.addr: " << hint.addr << std::endl;
+    } else {
+        std::cout << "[ConnectionFX3Entry] hint.addr is empty" << std::endl;
+    }
+
     // Check if hint.addr specifies a direct file descriptor
     if (!hint.addr.empty() && hint.addr.substr(0, 3) == "fd:") {
         std::cout << "[ConnectionFX3Entry] Detected direct FD mode in hint.addr: " << hint.addr << std::endl;

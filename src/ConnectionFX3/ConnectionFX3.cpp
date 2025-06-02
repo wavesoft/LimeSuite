@@ -14,7 +14,7 @@
 #include <fstream>
 #include <thread>
 #include <chrono>
-#include <unistd.h>
+#include <iostream>
 #ifdef __unix__
 #include <sys/stat.h>
 #endif
@@ -202,33 +202,42 @@ int ConnectionFX3::Open(const std::string &vidpid, const std::string &serial, co
 #else
     // Check if we're using direct file descriptor access
     if (vidpid.substr(0, 3) == "fd:") {
+        std::cout << "[ConnectionFX3] Detected direct FD mode in vidpid: " << vidpid << std::endl;
         try {
             direct_fd = std::stoi(vidpid.substr(3));
+            std::cout << "[ConnectionFX3] Parsed FD number: " << direct_fd << std::endl;
             is_direct_fd = true;
             
-            // Verify the file descriptor is valid and points to a USB device
+            // Verify the file descriptor is valid and points to a character device
             struct stat st;
             if (fstat(direct_fd, &st) != 0) {
+                std::cout << "[ConnectionFX3] Invalid file descriptor" << std::endl;
                 return ReportError(-1, "Invalid file descriptor");
             }
             
             // Check if it's a character device (typical for USB devices)
             if (!S_ISCHR(st.st_mode)) {
+                std::cout << "[ConnectionFX3] File descriptor does not point to a character device" << std::endl;
                 return ReportError(-1, "File descriptor does not point to a character device");
             }
+            
+            std::cout << "[ConnectionFX3] FD is valid character device" << std::endl;
             
             // Set up bulk control endpoints
             bulkCtrlAvailable = true;
             isConnected = true;
             contexts = new USBTransferContext[USB_MAX_CONTEXTS];
             contextsToSend = new USBTransferContext[USB_MAX_CONTEXTS];
+            std::cout << "[ConnectionFX3] Successfully initialized direct FD mode" << std::endl;
             return 0;
         } catch (const std::exception& e) {
+            std::cout << "[ConnectionFX3] Error processing FD: " << e.what() << std::endl;
             return ReportError(-1, "Invalid file descriptor format");
         }
     }
 
     // Regular libusb initialization
+    std::cout << "[ConnectionFX3] Using regular libusb mode" << std::endl;
     is_direct_fd = false;
     direct_fd = -1;
     const auto splitPos = vidpid.find(":");
