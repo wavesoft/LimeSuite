@@ -428,6 +428,7 @@ int ConnectionFX3::Write(const unsigned char *buffer, const int length, int time
     if (is_direct_fd) {
         ssize_t written = write(direct_fd, wbuffer, length);
         if (written < 0) {
+            std::cout << "[ConnectionFX3] Write failed: " << strerror(errno) << std::endl;
             len = 0;
         } else {
             len = written;
