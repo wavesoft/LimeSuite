@@ -33,12 +33,12 @@ bool ConnectionFX3Entry::initialize_libusb()
     const char* termux_fd = std::getenv("TERMUX_USB_FD");
     if (termux_fd) {
         // In Termux mode, disable device discovery
+        libusb_set_option(ctx, LIBUSB_OPTION_NO_DEVICE_DISCOVERY);
         int r = libusb_init(&ctx);
         if (r < 0) {
             lime::error("Init Error %i", r);
             return false;
         }
-        libusb_set_option(ctx, LIBUSB_OPTION_NO_DEVICE_DISCOVERY);
     } else {
         // Normal mode
         int r = libusb_init(&ctx);
