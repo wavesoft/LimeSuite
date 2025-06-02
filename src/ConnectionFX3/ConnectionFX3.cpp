@@ -437,7 +437,7 @@ int ConnectionFX3::Write(const unsigned char *buffer, const int length, int time
 {
     std::lock_guard<std::mutex> lock(mExtraUsbMutex);
     long len = length;
-    std::cout << "[ConnectionFX3] Write operation started with length: " << length << " and timeout_ms: " << timeout_ms << " and is_direct_fd: " << is_direct_fd << std::endl;
+    std::cout << "[ConnectionFX3] Write operation started with length: " << length << " and timeout_ms: " << timeout_ms << std::endl;
     if(IsOpen() == false)
         return 0;
 
@@ -456,17 +456,7 @@ int ConnectionFX3::Write(const unsigned char *buffer, const int length, int time
     else
         len = 0;
     #else
-    if (is_direct_fd) {
-        ssize_t written = write(direct_fd, wbuffer, length);
-        if (written < 0) {
-            std::cout << "[ConnectionFX3] Write failed: " << strerror(errno) << std::endl;
-            len = 0;
-        } else {
-            len = written;
-        }
-        std::cout << "[ConnectionFX3] Write successful: " << written << " bytes written" << std::endl;
-    }
-    else if(bulkCtrlAvailable
+    if(bulkCtrlAvailable
         && commandsToBulkCtrl.find(buffer[0]) != commandsToBulkCtrl.end())
     {
         bulkCtrlInProgress = true;
@@ -507,15 +497,7 @@ int ConnectionFX3::Read(unsigned char *buffer, const int length, int timeout_ms)
     else
         len = 0;
 #else
-    if (is_direct_fd) {
-        ssize_t read_bytes = read(direct_fd, buffer, length);
-        if (read_bytes < 0) {
-            len = 0;
-        } else {
-            len = read_bytes;
-        }
-    }
-    else if(bulkCtrlAvailable && bulkCtrlInProgress)
+    if(bulkCtrlAvailable && bulkCtrlInProgress)
     {
         int actual = 0;
         int r = libusb_bulk_transfer(dev_handle, ctrlBulkInAddr, buffer, len, &actual, timeout_ms);
