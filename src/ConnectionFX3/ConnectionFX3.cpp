@@ -407,6 +407,7 @@ int ConnectionFX3::Write(const unsigned char *buffer, const int length, int time
 {
     std::lock_guard<std::mutex> lock(mExtraUsbMutex);
     long len = length;
+    std::cout << "[ConnectionFX3] Write operation started with length: " << length << " and timeout_ms: " << timeout_ms << " and is_direct_fd: " << is_direct_fd << std::endl;
     if(IsOpen() == false)
         return 0;
 
@@ -447,6 +448,7 @@ int ConnectionFX3::Write(const unsigned char *buffer, const int length, int time
         len = libusb_control_transfer(dev_handle, LIBUSB_REQUEST_TYPE_VENDOR,CTR_W_REQCODE ,CTR_W_VALUE, CTR_W_INDEX, wbuffer, length, timeout_ms);
     #endif
     delete[] wbuffer;
+    std::cout << "[ConnectionFX3] Write operation completed with length: " << len << std::endl;
     return len;
 }
 
