@@ -15,6 +15,7 @@
 #include <thread>
 #include <chrono>
 #include <iostream>
+#include <unistd.h>
 #ifdef __unix__
 #include <sys/stat.h>
 #endif
