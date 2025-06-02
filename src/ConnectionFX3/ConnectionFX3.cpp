@@ -433,6 +433,7 @@ int ConnectionFX3::Write(const unsigned char *buffer, const int length, int time
         } else {
             len = written;
         }
+        std::cout << "[ConnectionFX3] Write successful: " << written << " bytes written" << std::endl;
     }
     else if(bulkCtrlAvailable
         && commandsToBulkCtrl.find(buffer[0]) != commandsToBulkCtrl.end())
