@@ -85,10 +85,10 @@ public:
 class ConnectionFX3 : public LMS64CProtocol
 {
 public:
-    ConnectionFX3(void* arg, const std::string &vidpid, const std::string &serial, const unsigned index);
+    ConnectionFX3(void* arg, const ConnectionHandle &handle);
     ~ConnectionFX3(void);
 
-    int Open(const std::string &vidpid, const std::string &serial, const unsigned index);
+    int Open(const ConnectionHandle &handle);
     void Close();
     bool IsOpen();
     int GetOpenedIndex();

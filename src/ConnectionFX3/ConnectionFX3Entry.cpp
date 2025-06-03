@@ -22,6 +22,63 @@ void ConnectionFX3Entry::handle_libusb_events()
         if(r != 0) lime::error("error libusb_handle_events %s", libusb_strerror(libusb_error(r)));
     }
 }
+
+// Helper function to validate device and create handle
+static bool validateAndCreateHandle(libusb_context* ctx, libusb_device_handle* dev_handle, 
+                                  const ConnectionHandle& hint, ConnectionHandle& handle)
+{
+    libusb_device *device = libusb_get_device(dev_handle);
+    libusb_device_descriptor desc;
+    if (libusb_get_device_descriptor(device, &desc) < 0) {
+        lime::error("Failed to get device descriptor");
+        return false;
+    }
+
+    // Verify it's a supported device
+    bool isSupported = false;
+    if (desc.idVendor == 1204 && desc.idProduct == 34323) {
+        handle.name = "DigiGreen";
+        isSupported = true;
+    }
+    else if ((desc.idVendor == 1204 && desc.idProduct == 241) || 
+             (desc.idVendor == 1204 && desc.idProduct == 243) || 
+             (desc.idVendor == 7504 && desc.idProduct == 24840)) {
+        isSupported = true;
+    }
+
+    if (!isSupported) {
+        lime::error("Device is not supported (VID: 0x%04x, PID: 0x%04x)", desc.idVendor, desc.idProduct);
+        return false;
+    }
+
+    // Get device speed
+    int speed = libusb_get_device_speed(device);
+    if (speed == LIBUSB_SPEED_HIGH)
+        handle.media = "USB 2.0";
+    else if (speed == LIBUSB_SPEED_SUPER)
+        handle.media = "USB 3.0";
+    else
+        handle.media = "USB";
+
+    // Get device name
+    char data[255];
+    int r = libusb_get_string_descriptor_ascii(dev_handle, LIBUSB_CLASS_COMM, (unsigned char*)data, sizeof(data));
+    if (r > 0) handle.name = std::string(data, size_t(r));
+
+    // Get serial number if available
+    if (desc.iSerialNumber > 0) {
+        r = libusb_get_string_descriptor_ascii(dev_handle, desc.iSerialNumber, (unsigned char*)data, sizeof(data));
+        if (r >= 0) {
+            handle.serial = std::string(data, size_t(r));
+        }
+    }
+
+    r = std::sprintf(data, "%.4x:%.4x", int(desc.idVendor), int(desc.idProduct));
+    if (r > 0) handle.addr = std::string(data, size_t(r));
+
+    // Check if serial matches hint (if provided)
+    return hint.serial.empty() || handle.serial.find(hint.serial) != std::string::npos;
+}
 #endif // __UNIX__
 
 //! make a static-initialized entry in the registry
@@ -52,6 +109,11 @@ ConnectionFX3Entry::ConnectionFX3Entry(void):
     ConnectionRegistryEntry("FX3")
 {
 #ifdef __unix__
+    const char* termux_fd = getenv("TERMUX_USB_FD");
+    if (termux_fd) {
+        // Disable device discovery when using pre-opened FD
+        libusb_set_option(NULL, LIBUSB_OPTION_NO_DEVICE_DISCOVERY);
+    }
     int r = libusb_init(&ctx); //initialize the library for the session we just declared
     if(r < 0)
         lime::error("Init Error %i", r); //there was an error
@@ -109,6 +171,29 @@ std::vector<ConnectionHandle> ConnectionFX3Entry::enumerate(const ConnectionHand
         }
     }
 #else
+    const char* termux_fd = getenv("TERMUX_USB_FD");
+    if (termux_fd) {
+        // When using pre-opened FD, validate the device
+        libusb_device_handle *tempDev_handle(nullptr);
+        int fd = std::stoi(termux_fd);
+        
+        // Try to wrap the system device
+        if (libusb_wrap_sys_device(ctx, fd, &tempDev_handle) != 0) {
+            lime::error("Failed to wrap system device");
+            return handles;
+        }
+
+        ConnectionHandle handle;
+        handle.fd = fd;
+        
+        if (validateAndCreateHandle(ctx, tempDev_handle, hint, handle)) {
+            handles.push_back(handle);
+        }
+
+        libusb_close(tempDev_handle);
+        return handles;
+    }
+
     libusb_device **devs; //pointer to pointer of device, used to retrieve a list of devices
     int usbDeviceCount = libusb_get_device_list(ctx, &devs);
 
@@ -119,62 +204,16 @@ std::vector<ConnectionHandle> ConnectionFX3Entry::enumerate(const ConnectionHand
 
     for(int i=0; i<usbDeviceCount; ++i)
     {
-        libusb_device_descriptor desc;
-        int r = libusb_get_device_descriptor(devs[i], &desc);
-        if(r<0)
-            lime::error("failed to get device description");
-        int pid = desc.idProduct;
-        int vid = desc.idVendor;
+        libusb_device_handle *tempDev_handle(nullptr);
+        if(libusb_open(devs[i], &tempDev_handle) != 0 || tempDev_handle == nullptr)
+            continue;
 
-        if(vid == 1204 && pid == 34323)
-        {
-            ConnectionHandle handle;
-            handle.media = "USB";
-            handle.name = "DigiGreen";
-            handle.addr = std::to_string(int(pid))+":"+std::to_string(int(vid));
+        ConnectionHandle handle;
+        if (validateAndCreateHandle(ctx, tempDev_handle, hint, handle)) {
             handles.push_back(handle);
         }
-        else if((vid == 1204 && pid == 241) || (vid == 1204 && pid == 243) || (vid == 7504 && pid == 24840))
-        {
-            libusb_device_handle *tempDev_handle(nullptr);
-            if(libusb_open(devs[i], &tempDev_handle) != 0 || tempDev_handle == nullptr)
-                continue;
 
-            ConnectionHandle handle;
-
-            //check operating speed
-            int speed = libusb_get_device_speed(devs[i]);
-            if(speed == LIBUSB_SPEED_HIGH)
-                handle.media = "USB 2.0";
-            else if(speed == LIBUSB_SPEED_SUPER)
-                handle.media = "USB 3.0";
-            else
-                handle.media = "USB";
-
-            //read device name
-            char data[255];
-            r = libusb_get_string_descriptor_ascii(tempDev_handle,  LIBUSB_CLASS_COMM, (unsigned char*)data, sizeof(data));
-            if(r > 0) handle.name = std::string(data, size_t(r));
-
-            r = std::sprintf(data, "%.4x:%.4x", int(vid), int(pid));
-            if (r > 0) handle.addr = std::string(data, size_t(r));
-
-            if (desc.iSerialNumber > 0)
-            {
-                r = libusb_get_string_descriptor_ascii(tempDev_handle,desc.iSerialNumber,(unsigned char*)data, sizeof(data));
-                if(r<0)
-                    lime::error("failed to get serial number");
-                else
-                    handle.serial = std::string(data, size_t(r));
-            }
-            libusb_close(tempDev_handle);
-
-            //add handle conditionally, filter by serial number
-            if (hint.serial.empty() or handle.serial.find(hint.serial) != std::string::npos)
-            {
-                handles.push_back(handle);
-            }
-        }
+        libusb_close(tempDev_handle);
     }
 
     libusb_free_device_list(devs, 1);
@@ -184,5 +223,5 @@ std::vector<ConnectionHandle> ConnectionFX3Entry::enumerate(const ConnectionHand
 
 IConnection *ConnectionFX3Entry::make(const ConnectionHandle &handle)
 {
-    return new ConnectionFX3(ctx, handle.addr, handle.serial, handle.index);
+    return new ConnectionFX3(ctx, handle);
 }
