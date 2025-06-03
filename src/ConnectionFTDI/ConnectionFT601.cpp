@@ -54,7 +54,7 @@ ConnectionFT601::ConnectionFT601(void *arg, const ConnectionHandle &handle)
     mUsbCounter = 0;
     ctx = (libusb_context *)arg;
 #endif
-    if (this->Open(handle.serial, vid, pid) != 0)
+    if (this->Open(handle) != 0)
         lime::error("Failed to open device");
 }
 
@@ -128,14 +128,14 @@ int ConnectionFT601::FT_SetStreamPipe(unsigned char ep, size_t size)
 /**	@brief Tries to open connected USB device and find communication endpoints.
 @return Returns 0-Success, other-EndPoints not found or device didn't connect.
 */
-int ConnectionFT601::Open(const std::string &serial, int vid, int pid)
+int ConnectionFT601::Open(const ConnectionHandle &handle)
 {
 #ifndef __unix__
     DWORD devCount;
     FT_STATUS ftStatus = FT_OK;
     DWORD dwNumDevices = 0;
     // Open a device
-    ftStatus = FT_Create((void*)serial.c_str(), FT_OPEN_BY_SERIAL_NUMBER, &mFTHandle);
+    ftStatus = FT_Create((void*)handle.serial.c_str(), FT_OPEN_BY_SERIAL_NUMBER, &mFTHandle);
     if (FT_FAILED(ftStatus))
     {
         ReportError(ENODEV, "Failed to list USB Devices");
@@ -156,41 +156,52 @@ int ConnectionFT601::Open(const std::string &serial, int vid, int pid)
     isConnected = true;
     return 0;
 #else
-
-    libusb_device **devs; //pointer to pointer of device, used to retrieve a list of devices
-    int usbDeviceCount = libusb_get_device_list(ctx, &devs);
-
-    if (usbDeviceCount < 0)
-        return ReportError(-1, "libusb_get_device_list failed: %s", libusb_strerror(libusb_error(usbDeviceCount)));
-
-    for(int i=0; i<usbDeviceCount; ++i)
-    {
-        libusb_device_descriptor desc;
-        int r = libusb_get_device_descriptor(devs[i], &desc);
-        if(r<0) {
-            lime::error("failed to get device description");
-            continue;
+    if (handle.fd) { // Check if we have a file descriptor in the handle
+        // Use the pre-opened file descriptor
+        if (libusb_wrap_sys_device(ctx, handle.fd, &dev_handle) != 0) {
+            return ReportError(ENODEV, "Failed to wrap system device");
         }
-        if (desc.idProduct != pid) continue;
-        if (desc.idVendor != vid) continue;
-        if(libusb_open(devs[i], &dev_handle) != 0) continue;
+    } else {
+        libusb_device **devs; //pointer to pointer of device, used to retrieve a list of devices
+        int usbDeviceCount = libusb_get_device_list(ctx, &devs);
 
-        std::string foundSerial;
-        if (desc.iSerialNumber > 0)
+        if (usbDeviceCount < 0)
+            return ReportError(-1, "libusb_get_device_list failed: %s", libusb_strerror(libusb_error(usbDeviceCount)));
+
+        const auto pidvid = handle.addr;
+        const auto splitPos = pidvid.find(":");
+        const int pid = std::stoi(pidvid.substr(0, splitPos));
+        const int vid = std::stoi(pidvid.substr(splitPos+1));
+
+        for(int i=0; i<usbDeviceCount; ++i)
         {
-            char data[255];
-            r = libusb_get_string_descriptor_ascii(dev_handle,desc.iSerialNumber,(unsigned char*)data, sizeof(data));
-            if(r<0)
-                lime::error("failed to get serial number");
-            else
-                foundSerial = std::string(data, size_t(r));
-        }
+            libusb_device_descriptor desc;
+            int r = libusb_get_device_descriptor(devs[i], &desc);
+            if(r<0) {
+                lime::error("failed to get device description");
+                continue;
+            }
+            if (desc.idProduct != pid) continue;
+            if (desc.idVendor != vid) continue;
+            if(libusb_open(devs[i], &dev_handle) != 0) continue;
 
-        if (serial == foundSerial) break; //found it
-        libusb_close(dev_handle);
-        dev_handle = nullptr;
+            std::string foundSerial;
+            if (desc.iSerialNumber > 0)
+            {
+                char data[255];
+                r = libusb_get_string_descriptor_ascii(dev_handle,desc.iSerialNumber,(unsigned char*)data, sizeof(data));
+                if(r<0)
+                    lime::error("failed to get serial number");
+                else
+                    foundSerial = std::string(data, size_t(r));
+            }
+
+            if (handle.serial == foundSerial) break; //found it
+            libusb_close(dev_handle);
+            dev_handle = nullptr;
+        }
+        libusb_free_device_list(devs, 1);
     }
-    libusb_free_device_list(devs, 1);
 
     if(dev_handle == nullptr)
         return ReportError(ENODEV, "libusb_open failed");

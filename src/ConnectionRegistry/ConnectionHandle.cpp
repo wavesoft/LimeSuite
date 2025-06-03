@@ -85,6 +85,7 @@ std::string ConnectionHandle::serialize(void) const
     if (not addr.empty()) out += ", addr="+addr;
     if (not serial.empty()) out += ", serial="+serial;
     if (index != -1) out += ", index="+std::to_string(index);
+    if (fd != 0) out += ", fd="+std::to_string(fd);
 
     return out;
 }

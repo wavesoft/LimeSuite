@@ -62,6 +62,17 @@ public:
     long long index;
 
     /*!
+     * A file descriptor number when using pre-opened device access.
+     *
+     * This FD will be wrapped with `libusb_wrap_sys_device` to create a device handle.
+     *
+     * This is primarily used in the Android context, because the user has no authority
+     * to access the USB device enumeration in general, and therefore the USB has to be
+     * openned using the Java API.
+     */
+    int fd;
+
+    /*!
      * Serialize this connection handle into a string format.
      * This string format can be used to represent the handle.
      */
